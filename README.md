@@ -13,7 +13,7 @@ This project is a **proof of concept** that demonstrates the basic structure of 
 - ✅ Implements conditionals and loops
 - ✅ Supports serialization of AST back to bash syntax
 - ✅ Includes round trip testing (bash -> AST -> bash)
-- ❌ Does not preserve source formatting during round-trip conversions (feature removed)
+- ❌ Does not execute the commands
 - ❌ Does not execute the commands
 
 See [DESIGN.md](DESIGN.md) for a detailed specification of the intended functionality.
@@ -70,7 +70,7 @@ Check out the `examples` directory for more detailed examples:
 
 - `basic_example.exs`: Demonstrates parsing of simple commands, arguments, and pipes
 - `advanced_example.exs`: Demonstrates simplified parsing of conditionals and loops
-- `round_trip_example.exs`: Demonstrates source preservation in round-trip conversions
+- `round_trip_example.exs`: Demonstrates round-trip conversions (bash -> AST -> bash)
 
 To run an example:
 
@@ -94,7 +94,7 @@ elixir -pa _build/dev/lib/bash_interpreter/ebin examples/basic_example.exs
 
 To make this a fully functional bash interpreter, the following would need to be implemented:
 
-1. **Source Preservation**: Re-implement source tracking to preserve exact whitespace from the original source code
+1. **Execution**: Implement an executor to actually run the commands
 2. **Execution**: Implement an executor to actually run the commands
 3. **Error Handling**: Enhance error detection and reporting
 4. **Additional Features**: Support for functions, subshells, variable expansion, etc.

@@ -180,15 +180,15 @@ else
 fi
 ```
 
-The parser must correctly handle the nesting of the `for` loop inside the `if` statement, and each node must have the correct source information.
+The parser must correctly handle the nesting of the `for` loop inside the `if` statement.
 
 ### 2. Quoted Strings
 
-Quoted strings require special handling in the lexer. Both single and double quotes should be supported, and quotes within quotes (escaped) should be handled correctly. The source information must include the quotes.
+Quoted strings require special handling in the lexer. Both single and double quotes should be supported, and quotes within quotes (escaped) should be handled correctly.
 
 ### 3. Variable Expansion
 
-While the parser doesn't need to perform variable expansion, it should correctly identify variables in the input and preserve their exact formatting.
+While the parser doesn't need to perform variable expansion, it should correctly identify variables in the input.
 
 ### 4. Error Handling
 
@@ -230,18 +230,17 @@ The interpreter includes round trip testing to verify that bash syntax can be pa
 
 ## Future Extensions
 
-1. **Source Preservation**: Implement source tracking to preserve exact whitespace from the original source code
+1. **Implement an executor to run the commands**:
+   - Support for executing commands in a controlled environment
+   - Variable expansion
+   - Exit code handling
 2. **Add support for more bash features**:
    - Functions
    - Subshells
    - Command substitution
    - Arithmetic expansion
-3. **Implement an executor to run the commands**:
-   - Support for executing commands in a controlled environment
-   - Variable expansion
-   - Exit code handling
-4. **Add support for bash builtins**:
+3. **Add support for bash builtins**:
    - cd, echo, export, etc.
-5. **Enhance error reporting and recovery**:
+4. **Enhance error reporting and recovery**:
    - Better error messages
    - Recovery from syntax errors

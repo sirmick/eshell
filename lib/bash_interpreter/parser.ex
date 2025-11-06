@@ -57,7 +57,7 @@ defmodule BashInterpreter.Parser do
     parse_commands(rest, commands, original_input)
   end
 
-  defp parse_commands([{:command, word} | rest], commands, original_input) when word in ["fi", "done", "else", "then", "do"] do
+  defp parse_commands([{:command, word} | rest], commands, original_input) when word in ["fi", "done", "then", "do", "else"] do
     parse_commands(rest, commands, original_input)
   end
 
@@ -258,14 +258,23 @@ defmodule BashInterpreter.Parser do
     end
 
     # Extract then branch (everything until 'else' or 'fi')
-    {then_tokens, rest} = extract_until_nested(rest, ["else", "fi"], ["if", "fi", "for", "while", "do", "done"])
+    {then_tokens, post_then} = extract_until_nested(rest, ["else", "fi"], ["if", "fi", "for", "while", "do", "done"])
+
+    # Check if we have an else branch - restore the else token
+    {have_else, rest} = case post_then do
+      [{:command, "else"} | _else_rest] ->
+        {true, post_then}  # Keep the full post_then without modification
+      _ ->
+        {false, post_then}
+    end
 
     # Parse the then branch as a sequence of commands
     then_branch = parse_tokens(then_tokens, "")
 
+
     # Check if we have an else branch
     case rest do
-      [{:command, "else"} | else_rest] ->
+      [{:command, "else"} | else_rest] when have_else ->
         # Extract tokens for the else branch (everything until 'fi')
         {else_tokens, fi_rest} = extract_until_nested(else_rest, ["fi"], ["if", "fi", "for", "while", "do", "done"])
 
@@ -313,17 +322,35 @@ defmodule BashInterpreter.Parser do
       end)
       |> Enum.reject(&(&1 == ""))
 
-      # For bracket expressions and complex conditions, use "test" as command name
-      # or empty string for complex expressions
-      name = case args do
-        ["[" | _] -> "test"
-        ["test" | _] -> "test"
-        _ -> ""
+      # Handle the args properly - if the first token is already "test", don't duplicate it
+      # If it's a bracket expression or other format, handle accordingly
+      {name, final_args} = cond do
+        # First token is already "test" - use it and remove from args
+        List.first(args) == "test" ->
+          {"test", Enum.drop(args, 1)}
+
+        # First token is "[" - this is a test expression
+        List.first(args) == "[" ->
+          {"test", args}
+
+        # Default case - if condition doesn't start with "test", use "test" as command name
+        true ->
+          {"test", args}
       end
 
       source_info = SourceInfo.new("")
-      %AST.Command{name: name, args: args, redirects: [], source_info: source_info}
+      %AST.Command{name: name, args: final_args, redirects: [], source_info: source_info}
     end
+  end
+
+  # Debug helper to trace conditional parsing issues
+  defp extract_until_nested_debug(tokens, end_keywords, nested_keywords, debug_name) do
+    result = extract_until_nested(tokens, end_keywords, nested_keywords)
+    IO.puts("DEBUG: Processing #{debug_name}")
+    IO.puts("  Input tokens: #{inspect(Enum.take(tokens, 10))}...")
+    IO.puts("  End keywords: #{inspect(end_keywords)}")
+    IO.puts("  Result: #{inspect(result)}")
+    result
   end
 
   # Helper to extract for loop items including command substitutions

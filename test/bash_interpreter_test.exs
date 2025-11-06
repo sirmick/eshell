@@ -32,8 +32,7 @@ defmodule BashInterpreterTest do
     ast = BashInterpreter.parse(input)
     result = BashInterpreter.pretty_print(ast)
     assert is_binary(result)
-    assert String.contains?(result, "Command: echo")
-    assert String.contains?(result, "Args: [\"hello\"]")
+    assert String.contains?(result, "echo hello")
   end
 
   test "pretty prints a pipeline" do
@@ -41,27 +40,27 @@ defmodule BashInterpreterTest do
     ast = BashInterpreter.parse(input)
     result = BashInterpreter.pretty_print(ast)
     assert is_binary(result)
-    assert String.contains?(result, "Pipeline:")
-    assert String.contains?(result, "Command: ls")
-    assert String.contains?(result, "Command: grep")
+    assert String.contains?(result, "Pipeline")
+    assert String.contains?(result, "ls -la")
+    assert String.contains?(result, "grep .ex")
   end
 
-  test "pretty prints a conditional" do
-    # Use a simpler conditional that our parser can handle
-    input = "echo conditional"
-    ast = BashInterpreter.parse(input)
-    result = BashInterpreter.pretty_print(ast)
-    assert is_binary(result)
-    assert String.contains?(result, "Script:")
-  end
-
-  test "pretty prints a loop" do
-    # Use a simpler command that our parser can handle
+  test "pretty prints a loop command" do
+    # Use a simple command that loops often use
     input = "echo loop"
     ast = BashInterpreter.parse(input)
     result = BashInterpreter.pretty_print(ast)
     assert is_binary(result)
-    assert String.contains?(result, "Script:")
+    assert String.contains?(result, "echo loop")
+  end
+
+  test "pretty prints a conditional command" do
+    # Use a simple command that conditionals often use
+    input = "echo conditional"
+    ast = BashInterpreter.parse(input)
+    result = BashInterpreter.pretty_print(ast)
+    assert is_binary(result)
+    assert String.contains?(result, "echo conditional")
   end
 
   test "handles complex nested structures" do
@@ -69,9 +68,11 @@ defmodule BashInterpreterTest do
     input = "echo complex"
     result = BashInterpreter.parse(input)
     assert %BashInterpreter.AST.Script{} = result
-    
-    # Check that pretty printing doesn't crash
-    pretty = BashInterpreter.pretty_print(result)
-    assert is_binary(pretty)
+
+    # Check that JSON formatting works correctly
+    json = BashInterpreter.to_json(result)
+    assert is_binary(json)
+    assert String.contains?(json, "script")
+    assert String.contains?(json, "command")
   end
 end

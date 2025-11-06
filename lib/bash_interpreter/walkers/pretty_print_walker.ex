@@ -18,13 +18,18 @@ defmodule BashInterpreter.Walkers.PrettyPrintWalker do
   @doc """
   Walks a Script node and returns a tree-formatted string.
   """
-  def walk_script(%AST.Script{commands: commands}, opts) do
-    indent = Keyword.get(opts, :indent, 0)
-    spaces = String.duplicate(" ", indent)
+  def walk_script(%AST.Script{commands: commands}, _opts) do
+    spaces = ""
+    indent = 0
 
-    ["#{spaces}Script"]
-    |> then(& add_commands(&1, commands, spaces))
-    |> Enum.join("\n")
+    # Clean, simple tree format
+    if Enum.empty?(commands) do
+      "#{spaces}└─ (empty)"
+    else
+      ["#{spaces}Script"]
+      |> then(& add_commands(&1, commands, spaces))
+      |> Enum.join("\n")
+    end
   end
 
   @doc """
@@ -32,10 +37,10 @@ defmodule BashInterpreter.Walkers.PrettyPrintWalker do
   """
   def walk_command(%AST.Command{name: name, args: args, redirects: redirects}, opts) do
     indent = Keyword.get(opts, :indent, 0)
-    root_prefix = String.duplicate(" ", indent)
+    spaces = String.duplicate(" ", indent)
 
-    # Build condensed single line: command args [redirections]
-    main_line_prefix = if indent > 0, do: "#{root_prefix}└─ ", else: ""
+    # Clean tree format: name args [redirections]
+    main_line_prefix = if indent > 0, do: "#{spaces}└─ ", else: ""
     args_str = if !Enum.empty?(args), do: " #{Enum.join(args, " ")}", else: ""
     redirects_str = if !Enum.empty?(redirects) do
       " [#{format_redirects(redirects)}]"

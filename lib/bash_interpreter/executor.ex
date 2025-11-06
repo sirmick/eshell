@@ -31,7 +31,11 @@ defmodule BashInterpreter.Executor do
       iex> BashInterpreter.Executor.execute(ast, :serialize)
       "echo hello"
   """
-  def execute(ast, mode \\ :pretty_print, opts \\ [])
+  def execute(ast, mode \\ :json, opts \\ [])
+
+  def execute(ast, :json, _opts) do
+    BashInterpreter.to_json(ast)
+  end
 
   def execute(ast, :pretty_print, _opts) do
     BashInterpreter.pretty_print(ast)

@@ -45,11 +45,39 @@ defmodule BashInterpreter do
   ## Examples
 
       iex> result = "echo hello" |> BashInterpreter.parse() |> BashInterpreter.pretty_print()
-      iex> String.contains?(result, "Command: echo")
+      iex> String.contains?(result, "echo hello")
       true
   """
-  def pretty_print(ast_node, _opts \\ []) do
+  def pretty_print(ast_node, opts \\ []) do
     BashInterpreter.ASTWalker.walk(ast_node, BashInterpreter.Walkers.PrettyPrintWalker)
+  end
+
+  @doc """
+  Gets JSON representation of an AST for debugging.
+
+  ## Examples
+
+      iex> ast = BashInterpreter.parse("echo hello")
+      iex> json = BashInterpreter.to_json(ast)
+      iex> String.contains?(json, "\\\"name\\\":\\\"echo\\\"")
+      true
+  """
+  def to_json(ast_node, opts \\ []) do
+    BashInterpreter.Walkers.JSONWalker.to_json(ast_node, opts)
+  end
+
+  @doc """
+  Prints JSON representation of an AST to console for debugging.
+
+  This is useful for debugging the AST structure and understanding how
+  the parser represents different bash constructs.
+  """
+  def debug(ast_node, opts \\ []) do
+    json = to_json(ast_node, opts)
+    IO.puts("AST JSON:")
+    IO.puts(json)
+    IO.puts("")
+    json
   end
 
   @doc """
@@ -64,14 +92,14 @@ defmodule BashInterpreter do
 
       iex> ast = BashInterpreter.parse("echo hello")
       iex> result = BashInterpreter.execute(ast, :pretty_print)
-      iex> String.contains?(result, "Command: echo")
+      iex> String.contains?(result, "echo hello")
       true
 
       iex> ast = BashInterpreter.parse("echo hello")
       iex> BashInterpreter.execute(ast, :serialize)
       "echo hello"
   """
-  def execute(ast, mode \\ :pretty_print, opts \\ []) do
+  def execute(ast, mode \\ :json, opts \\ []) do
     Executor.execute(ast, mode, opts)
   end
 

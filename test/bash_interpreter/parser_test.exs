@@ -29,46 +29,31 @@ defmodule BashInterpreter.ParserTestClean do
   defp assert_parsing_correctness(input, description, expected_commands \\ nil) do
     memory_before = :erlang.memory()
 
-    try do
-      # Parse to AST - with safety fallback
-      ast = BashInterpreter.parse(input)
+    # Parse to AST - with safety fallback
+    ast = BashInterpreter.parse(input)
 
-      # Serialize back to bash
-      output = BashInterpreter.serialize(ast)
+    # Serialize back to bash
+    output = BashInterpreter.serialize(ast)
 
-      # Parse again to validate structure consistency
-      ast2 = BashInterpreter.parse(output)
+    # Parse again to validate structure consistency
+    ast2 = BashInterpreter.parse(output)
 
-      {ast, ast2, output}
-    rescue
-      error ->
-        IO.puts("❌ PARSING ERROR in '#{description}': #{inspect(error)}")
-        IO.puts("Input: #{inspect(input)}")
-        raise error
-    after
-      # Structure validation regardless of parse success
-      final_memory_before = memory_before
-      final_ast = BashInterpreter.parse(input)
-      final_output = BashInterpreter.serialize(final_ast)
-      final_ast2 = BashInterpreter.parse(final_output)
+    # Basic structure validation
+    expect = expected_commands || length(ast.commands)
+    actual = length(ast2.commands)
 
-      # Basic structure validation
-      expect = expected_commands || length(final_ast.commands)
-      actual = length(final_ast2.commands)
+    assert actual == expect,
+      "Round-trip structure error: Expected #{expect} commands, got #{actual}\n" <>
+      "Input: #{input}\n" <>
+      "Output: #{output}"
 
-      assert actual == expect,
-        "Round-trip structure error: Expected #{expect} commands, got #{actual}\n" <>
-        "Input: #{input}\n" <>
-        "Output: #{final_output}"
+    # Only track memory on successful parsing
+    memory_after = :erlang.memory()
+    memory_used = memory_after[:total] - memory_before[:total]
+    memory_mb = div(memory_used, 1024 * 1024)
 
-      # Only track memory on successful parsing
-      memory_after = :erlang.memory()
-      memory_used = memory_after[:total] - final_memory_before[:total]
-      memory_mb = div(memory_used, 1024 * 1024)
-
-      IO.puts("✓ #{description}: structure verified (#{memory_mb}MB)")
-      final_ast
-    end
+    IO.puts("✓ #{description}: structure verified (#{memory_mb}MB)")
+    ast
   end
 
   # Command structure validation

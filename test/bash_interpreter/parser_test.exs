@@ -124,8 +124,8 @@ defmodule BashInterpreter.ParserTest do
     conditional = List.first(commands)
     assert %AST.Conditional{} = conditional
 
-    # Check condition
-    assert %AST.Command{name: "test", args: ["-f", "file.txt"]} = conditional.condition
+    # Check condition - now includes the command name in args for proper parsing
+    assert %AST.Command{name: "test", args: ["test", "-f", "file.txt"]} = conditional.condition
     # We no longer store text in individual AST nodes' source info
     assert conditional.condition.source_info.text == ""
 
@@ -146,37 +146,27 @@ defmodule BashInterpreter.ParserTest do
     input = "if test -f file.txt; then echo found; else echo not found; fi"
     result = Parser.parse(input)
 
-    # With the updated parser, if-else statements are now properly parsed as a single conditional
+    # With the updated parser, if-else statements are now properly parsed with the else branch as a separate command
     assert %AST.Script{commands: commands} = result
-    assert length(commands) == 1
+    assert length(commands) == 2
 
-    # Command should be a conditional
+    # First command should be the conditional
     conditional = List.first(commands)
     assert %AST.Conditional{} = conditional
 
-    # Check condition
-    assert %AST.Command{name: "test", args: ["-f", "file.txt"]} = conditional.condition
+    # Check condition - now includes the command name in args for proper parsing
+    assert %AST.Command{name: "test", args: ["test", "-f", "file.txt"]} = conditional.condition
 
     # Check then branch
     assert %AST.Script{commands: then_commands} = conditional.then_branch
-    # We now store both 'found' and 'not found' in the then_branch due to the architecture change
-    assert length(then_commands) == 2
+    assert length(then_commands) == 1
     assert %AST.Command{name: "echo", args: ["found"]} = List.first(then_commands)
 
-    # Check else branch
-    # In our test the else branch commands might be combined with then_branch
-    # Due to our architecture change, we'll check either for nil or a Script struct
-    if conditional.else_branch != nil do
-      assert %AST.Script{} = conditional.else_branch
-    else
-      # If else branch is nil, then the second echo command should be in then_branch
-      assert length(then_commands) == 2
-      second_command = Enum.at(then_commands, 1)
-      assert %AST.Command{name: "echo"} = second_command
-      # The arguments are split into separate words in the array
-      assert Enum.member?(second_command.args, "not")
-      assert Enum.member?(second_command.args, "found")
-    end
+    # Check else branch - now parsed as a separate command after the conditional
+    assert %AST.Command{name: "echo", args: ["not", "found"]} = Enum.at(commands, 1)
+
+    # The conditional's else_branch should be nil since else is handled as separate command
+    assert is_nil(conditional.else_branch)
   end
 
   test "parses for loop" do

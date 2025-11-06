@@ -52,39 +52,41 @@ defmodule BashInterpreter.Parser do
   # Base case: no more tokens
   defp parse_commands([], commands, _original_input), do: {Enum.reverse(commands), []}
 
-  # Handle if statement
-  defp parse_commands([{:command, "if"} | rest], commands, original_input) do
-    {conditional, remaining} = parse_conditional(rest, original_input)
-    parse_commands(remaining, [conditional | commands], original_input)
-  end
-
-  # Handle for loop
-  defp parse_commands([{:command, "for"} | rest], commands, original_input) do
-    {loop, remaining} = parse_for_loop(rest, original_input)
-    parse_commands(remaining, [loop | commands], original_input)
-  end
-
-  # Handle while loop
-  defp parse_commands([{:command, "while"} | rest], commands, original_input) do
-    {loop, remaining} = parse_while_loop(rest, original_input)
-    parse_commands(remaining, [loop | commands], original_input)
-  end
-
-  # Skip control structure end keywords if encountered directly
-  defp parse_commands([{:command, word} | rest], commands, original_input)
-       when word in ["fi", "done", "else", "then", "do"] do
+  # Skip empty semicolons and control structure keywords
+  defp parse_commands([{:semicolon, _} | rest], commands, original_input) do
     parse_commands(rest, commands, original_input)
   end
 
-  # Handle command followed by semicolon
-  defp parse_commands(tokens, commands, original_input) do
-    {command, remaining} = parse_command_or_pipeline(tokens, original_input)
+  defp parse_commands([{:command, word} | rest], commands, original_input) when word in ["fi", "done", "else", "then", "do"] do
+    parse_commands(rest, commands, original_input)
+  end
 
-    case remaining do
-      [{:semicolon, _} | rest] -> parse_commands(rest, [command | commands], original_input)
-      [] -> {Enum.reverse([command | commands]), []}
-      _ -> parse_commands(remaining, [command | commands], original_input)
+  # Handle control structures generically
+  defp parse_commands([{:command, keyword} | rest], commands, original_input) do
+    case keyword do
+      "if" ->
+        {conditional, remaining} = parse_conditional(rest, original_input)
+        parse_commands(remaining, [conditional | commands], original_input)
+
+      "for" ->
+        {loop, remaining} = parse_for_loop(rest, original_input)
+        parse_commands(remaining, [loop | commands], original_input)
+
+      "while" ->
+        {loop, remaining} = parse_while_loop(rest, original_input)
+        parse_commands(remaining, [loop | commands], original_input)
+
+      _ ->
+        # Handle regular commands
+        {command, remaining} = parse_command_or_pipeline([{:command, keyword} | rest], original_input)
+        parse_commands(remaining, [command | commands], original_input)
     end
+  end
+
+  # Handle other token types
+  defp parse_commands([token | rest], commands, original_input) do
+    {command, remaining} = parse_command_or_pipeline([token | rest], original_input)
+    parse_commands(remaining, [command | commands], original_input)
   end
 
   # Parse a command or pipeline
@@ -126,6 +128,13 @@ defmodule BashInterpreter.Parser do
         command = %AST.Command{name: name, args: args, redirects: redirects, source_info: source_info}
         {command, remaining}
 
+      [{:string, str} | rest] ->
+        # Handle string tokens that might be bracket expressions or other complex conditions
+        {args, redirects, remaining} = parse_args_and_redirects(rest, [str], [], original_input)
+        source_info = SourceInfo.new("")
+        command = %AST.Command{name: "", args: args, redirects: redirects, source_info: source_info}
+        {command, remaining}
+
       _ ->
         source_info = SourceInfo.new("")
         {%AST.Command{name: "", args: [], redirects: [], source_info: source_info}, tokens}
@@ -142,6 +151,14 @@ defmodule BashInterpreter.Parser do
   defp parse_args_and_redirects([{:semicolon, _} | _] = tokens, args, redirects, _original_input), do: {Enum.reverse(args), Enum.reverse(redirects), tokens}
   defp parse_args_and_redirects([{:pipe, _} | _] = tokens, args, redirects, _original_input), do: {Enum.reverse(args), Enum.reverse(redirects), tokens}
   defp parse_args_and_redirects([{:command, word} | _] = tokens, args, redirects, _original_input) when word in ["then", "else", "fi", "do", "done", "in"], do: {Enum.reverse(args), Enum.reverse(redirects), tokens}
+
+  # Handle bracket expressions like [ -f file.txt ]
+  defp parse_args_and_redirects([{:string, "["} | rest], args, redirects, original_input) do
+    # Handle bracket expressions as a single argument
+    {bracket_args, remaining} = parse_bracket_expression(rest, ["["], [])
+    bracket_expr = Enum.join(bracket_args, " ")
+    parse_args_and_redirects(remaining, [bracket_expr | args], redirects, original_input)
+  end
 
   # Handle output redirection
   defp parse_args_and_redirects([{:redirect_output, _}, {:string, target} | rest], args, redirects, original_input) do
@@ -206,13 +223,33 @@ defmodule BashInterpreter.Parser do
     parse_args_and_redirects(rest, args, redirects, original_input)
   end
 
+  # Helper to parse bracket expressions like [ -f file.txt ]
+  defp parse_bracket_expression(tokens, acc, bracket_args) do
+    case tokens do
+      [{:string, "]"} | rest] ->
+        {acc ++ ["]"], rest}
+
+      [{:string, value} | rest] ->
+        parse_bracket_expression(rest, acc ++ [value], bracket_args ++ [value])
+
+      [{:command, cmd} | rest] ->
+        parse_bracket_expression(rest, acc ++ [cmd], bracket_args ++ [cmd])
+
+      [_ | rest] ->
+        parse_bracket_expression(rest, acc, bracket_args)
+
+      [] ->
+        {acc, []}
+    end
+  end
+
   # Parse conditional (if/then/else)
   defp parse_conditional(tokens, original_input) do
     # Extract condition (everything until 'then')
-    {condition_tokens, rest} = extract_until(tokens, "then")
+    {condition_tokens, rest} = extract_until_nested(tokens, ["then"], ["if", "fi", "for", "while", "do", "done"])
 
-    # Parse the condition as a command or pipeline
-    {condition, _} = parse_command_or_pipeline(condition_tokens, original_input)
+    # Build the condition as a single command with all tokens as arguments
+    condition = build_condition_command(condition_tokens)
 
     # Skip the 'then' token
     rest = case rest do
@@ -257,6 +294,35 @@ defmodule BashInterpreter.Parser do
         source_info = SourceInfo.new("")
         conditional = %AST.Conditional{condition: condition, then_branch: then_branch, else_branch: nil, source_info: source_info}
         {conditional, rest}
+    end
+  end
+
+  # Helper to build a condition command from tokens
+  defp build_condition_command(tokens) do
+    if Enum.empty?(tokens) do
+      source_info = SourceInfo.new("")
+      %AST.Command{name: "", args: [], redirects: [], source_info: source_info}
+    else
+      # Build the complete condition as arguments
+      args = Enum.map(tokens, fn
+        {:command, cmd} -> cmd
+        {:string, str} -> str
+        {:option, opt} -> opt
+        {:variable, var} -> var
+        _ -> ""
+      end)
+      |> Enum.reject(&(&1 == ""))
+
+      # For bracket expressions and complex conditions, use "test" as command name
+      # or empty string for complex expressions
+      name = case args do
+        ["[" | _] -> "test"
+        ["test" | _] -> "test"
+        _ -> ""
+      end
+
+      source_info = SourceInfo.new("")
+      %AST.Command{name: name, args: args, redirects: [], source_info: source_info}
     end
   end
 
@@ -459,18 +525,10 @@ defmodule BashInterpreter.Parser do
     end
 
     # Check if we're at a top-level end keyword
-    # Only match when the structure_stack is empty or the top structure matches
-    is_top_level_end = word in end_keywords && (
-      (word == "fi" && (Enum.empty?(new_stack) || List.first(structure_stack) == "if")) ||
-      (word == "done" && (Enum.empty?(new_stack) || List.first(structure_stack) in ["for", "while"])) ||
-      (word == "else" && (List.first(structure_stack) == "if")) ||
-      (word not in ["fi", "done", "else"])
-    )
+    is_top_level_end = word in end_keywords && Enum.empty?(new_stack)
 
-    if is_top_level_end &&
-       (word not in ["fi", "done", "else"] || Enum.empty?(new_stack) ||
-        (word == "else" && List.first(structure_stack) == "if")) do
-      {Enum.reverse(acc), tokens}
+    if is_top_level_end do
+      {Enum.reverse(acc), rest}  # Return the rest without the end keyword
     else
       extract_until_nested_helper(rest, [{:command, word} | acc], end_keywords, nested_keywords, new_stack)
     end

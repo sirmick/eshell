@@ -62,6 +62,7 @@ defmodule BashInterpreter.Parser do
   end
 
   defp parse_commands([{:command, word} | rest], commands, original_input) when word in ["fi", "done", "then", "do", "else"] do
+    # Skip control structure keywords that should have been consumed by their respective parsers
     parse_commands(rest, commands, original_input)
   end
 
@@ -136,7 +137,7 @@ defmodule BashInterpreter.Parser do
         # Handle string tokens that might be bracket expressions or other complex conditions
         {args, redirects, remaining} = parse_args_and_redirects(rest, [str], [], original_input)
         source_info = SourceInfo.new("")
-        command = %AST.Command{name: "", args: args, redirects: redirects, source_info: source_info}
+        command = %AST.Command{name: str, args: args, redirects: redirects, source_info: source_info}
         {command, remaining}
 
       _ ->
@@ -253,8 +254,15 @@ defmodule BashInterpreter.Parser do
     # Extract condition (everything until 'then')
     {condition_tokens, rest} = extract_until_nested(tokens, ["then"], ["if", "fi", "for", "while", "do", "done"])
 
-    # Build the condition as a single command with all tokens as arguments
-    condition = build_condition_command(condition_tokens)
+    # Parse the condition as a proper command or pipeline
+    condition = if length(condition_tokens) > 0 do
+      # Use build_condition_command to properly handle the condition tokens
+      build_condition_command(condition_tokens)
+    else
+      # Empty condition - create a default command
+      source_info = SourceInfo.new("")
+      %AST.Command{name: "", args: [], redirects: [], source_info: source_info}
+    end
 
     # Skip the 'then' token
     rest = case rest do
@@ -265,23 +273,14 @@ defmodule BashInterpreter.Parser do
     # Extract then branch (everything until 'else' or 'fi')
     {then_tokens, post_then} = extract_until_nested(rest, ["else", "fi"], ["if", "fi", "for", "while", "do", "done"])
 
-    # Check if we have an else branch - restore the else token
-    {have_else, rest} = case post_then do
-      [{:command, "else"} | _else_rest] ->
-        {true, post_then}  # Keep the full post_then without modification
-      _ ->
-        {false, post_then}
-    end
-
     # Parse the then branch as a sequence of commands
     then_branch = parse_tokens(then_tokens, "")
 
-
     # Check if we have an else branch
-    case rest do
-      [{:command, "else"} | else_rest] when have_else ->
+    case post_then do
+      [{:command, "else"} | else_rest] ->
         # Extract tokens for the else branch (everything until 'fi')
-        {else_tokens, fi_rest} = extract_until_nested(else_rest, ["fi"], ["if", "fi", "for", "while", "do", "done"])
+        {else_tokens, fi_rest} = extract_until_nested(else_rest, ["fi"], ["if", "fi", "for", "while", "do", "then"])
 
         # Parse the else branch as a separate script to maintain its command structure
         else_branch = parse_tokens(else_tokens, "")
@@ -311,6 +310,7 @@ defmodule BashInterpreter.Parser do
     end
   end
 
+
   # Helper to build a condition command from tokens
   defp build_condition_command(tokens) do
     if Enum.empty?(tokens) do
@@ -323,12 +323,13 @@ defmodule BashInterpreter.Parser do
         {:string, str} -> str
         {:option, opt} -> opt
         {:variable, var} -> var
+        {:semicolon, _} -> ""  # Filter out semicolons
         _ -> ""
       end)
       |> Enum.reject(&(&1 == ""))
+      |> Enum.filter(fn item -> item != "" end)
 
       # Handle the args properly - if the first token is already "test", don't duplicate it
-      # If it's a bracket expression or other format, handle accordingly
       {name, final_args} = cond do
         # First token is already "test" - use it and remove from args
         List.first(args) == "test" ->
@@ -338,24 +339,15 @@ defmodule BashInterpreter.Parser do
         List.first(args) == "[" ->
           {"test", args}
 
-        # Default case - if condition doesn't start with "test", use "test" as command name
+        # Default case - use first token as command name
         true ->
-          {"test", args}
+          name = List.first(args) || ""
+          {name, args}
       end
 
       source_info = SourceInfo.new("")
       %AST.Command{name: name, args: final_args, redirects: [], source_info: source_info}
     end
-  end
-
-  # Debug helper to trace conditional parsing issues
-  defp extract_until_nested_debug(tokens, end_keywords, nested_keywords, debug_name) do
-    result = extract_until_nested(tokens, end_keywords, nested_keywords)
-    IO.puts("DEBUG: Processing #{debug_name}")
-    IO.puts("  Input tokens: #{inspect(Enum.take(tokens, 10))}...")
-    IO.puts("  End keywords: #{inspect(end_keywords)}")
-    IO.puts("  Result: #{inspect(result)}")
-    result
   end
 
   # Helper to extract for loop items including command substitutions
@@ -378,7 +370,7 @@ defmodule BashInterpreter.Parser do
   end
 
   # Parse for loop
-  defp parse_for_loop(tokens, original_input) do
+  defp parse_for_loop(tokens, _original_input) do
     # Check for different for loop patterns
     case tokens do
       # Handle standard "for variable in items" format
@@ -414,6 +406,35 @@ defmodule BashInterpreter.Parser do
         loop = %AST.Loop{type: :for, condition: condition, body: body, source_info: source_info}
         {loop, rest}
 
+      # Handle "for variable; do" format (C-style for loop)
+      [{:string, variable} | rest] ->
+        # Skip to 'do' token
+        {_do_tokens, do_rest} = extract_until(rest, "do")
+
+        # Skip the 'do' token
+        rest = case do_rest do
+          [{:command, "do"} | rest_tokens] -> rest_tokens
+          _ -> do_rest
+        end
+
+        # Extract body (everything until 'done')
+        {body_tokens, done_rest} = extract_until_nested(rest, ["done"], ["if", "fi", "for", "while", "do"])
+
+        # Parse the body as a complete script
+        body = parse_tokens(body_tokens, "")
+
+        # Skip the 'done' token
+        rest = case done_rest do
+          [{:command, "done"} | rest_tokens] -> rest_tokens
+          _ -> done_rest
+        end
+
+        # Create for loop AST node with empty items (C-style)
+        condition = %{variable: variable, items: []}
+        source_info = SourceInfo.new("")
+        loop = %AST.Loop{type: :for, condition: condition, body: body, source_info: source_info}
+        {loop, rest}
+
       # Handle other formats or error cases
       _ ->
         # Return an empty loop with empty source info
@@ -427,7 +448,17 @@ defmodule BashInterpreter.Parser do
   defp parse_while_loop(tokens, original_input) do
     # Extract condition (everything until 'do')
     {condition_tokens, do_rest} = extract_until_nested(tokens, ["do"], ["if", "fi", "for", "done", "while"])
-    {condition, _} = parse_command_or_pipeline(condition_tokens, original_input)
+
+    # Parse condition as a proper command or pipeline
+    condition = if length(condition_tokens) > 0 do
+      # For while loops, the condition should be parsed as a command, not as arguments
+      # Use build_condition_command to properly handle the condition tokens
+      build_condition_command(condition_tokens)
+    else
+      # Empty condition - create a default command
+      source_info = SourceInfo.new("")
+      %AST.Command{name: "", args: [], redirects: [], source_info: source_info}
+    end
 
     # Skip the 'do' token
     rest = case do_rest do
@@ -522,7 +553,7 @@ defmodule BashInterpreter.Parser do
     {Enum.reverse(acc), []}
   end
 
-  defp extract_until_nested_helper([{:command, word} | rest] = tokens, acc, end_keywords, nested_keywords, structure_stack) do
+  defp extract_until_nested_helper([{:command, word} | rest] = _tokens, acc, end_keywords, nested_keywords, structure_stack) do
     # Update the structure stack based on control keywords
     new_stack = cond do
       # Push structures onto stack

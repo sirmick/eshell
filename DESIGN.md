@@ -11,6 +11,8 @@ This document outlines the design for a bash-like syntax interpreter implemented
 - Implement a parser that builds an AST from tokens
 - Support nested structures (conditionals, loops, pipelines)
 - Provide a clean, extensible design
+- Support round-trip conversion (bash → AST → bash)
+- Implement source information tracking for accurate reproduction
 
 ## Non-Goals
 
@@ -29,48 +31,76 @@ The lexer converts input text into a stream of tokens. Each token has a type and
 - `:string` - String literals and arguments
 - `:option` - Command options (starting with `-`)
 - `:variable` - Environment variables (starting with `$`)
+- `:command_substitution` - Dollar-parenthesis command substitution (`$(command)`)
 - `:pipe` - Pipe operator (`|`)
 - `:redirect_output` - Output redirection (`>`)
 - `:redirect_append` - Append redirection (`>>`)
 - `:redirect_input` - Input redirection (`<`)
 - `:semicolon` - Command separator (`;`)
+- `:newline` - Newline characters
 - `:lparen`, `:rparen` - Parentheses for subshells
 - `:lbrace`, `:rbrace` - Braces for command blocks
 
 **Special Handling:**
-- Quoted strings (both single and double quotes)
-- Keywords (if, then, else, fi, for, while, do, done, etc.)
+- Quoted strings (both single and double quotes) with proper escaping
+- Keywords (if, then, else, fi, for, while, do, done, in, until, elif)
+- Command substitution with balanced parentheses
+- Variable recognition
+- Context-aware token classification
+- Nested structure keywords
 
-### 2. AST Structures
+### 2. AST Walker Framework
+
+A generic walker pattern that allows different traversal strategies:
+
+- Pretty printing walker for human-readable output
+- JSON walker for serialization and debugging  
+- Round-trip walker for reproducing original bash syntax
+- Extensible design for adding new walkers
+
+### 3. AST Structures
 
 The AST represents the parsed bash commands and control structures.
 
 **Core Structures:**
-- `Script` - A sequence of commands
-- `Command` - A simple command with name, arguments, and redirections
+- `Script` - A sequence of commands with source information
+- `Command` - A simple command with name, arguments, redirections and source info
 - `Pipeline` - A sequence of commands connected by pipes
-- `Redirect` - Input/output redirection
-- `Conditional` - If/then/else structure
-- `Loop` - For/while loops
-- `Assignment` - Variable assignment
+- `Redirect` - Input/output redirection with type information
+- `Conditional` - If/then/else structure with proper nesting
+- `Loop` - For/while loops with body and condition handling
+- `Assignment` - Variable assignment with optional command substitution
 - `Subshell` - Commands executed in a subshell
 
-### 3. Parser
+### 4. Parser
 
 The parser converts tokens into an AST. It uses recursive descent parsing to handle nested structures.
 
 **Key Parsing Functions:**
-- `parse_commands` - Parse a sequence of commands
-- `parse_command` - Parse a simple command
-- `parse_pipeline` - Parse a pipeline of commands
-- `parse_conditional` - Parse if/then/else structures
-- `parse_loop` - Parse for/while loops
+- `parse_commands` - Parse a sequence of commands separated by semicolons/newlines
+- `parse_command` - Parse a simple command with arguments and redirections
+- `parse_pipeline` - Parse a pipeline of commands connected by pipes
+- `parse_conditional` - Parse if/then/else structures with proper nesting
+- `parse_for_loop` - Parse for loops with variable iteration
+- `parse_while_loop` - Parse while loops with command conditions
 - `parse_redirections` - Parse input/output redirections
+- `extract_until_nested` - Handle nested control structures with stack-based tracking
 
-**Handling Nested Structures:**
-- The parser must track context to handle nested structures
-- Each control structure has a clear beginning and end marker
-- The parser should maintain proper nesting levels
+**Advanced Features:**
+- Nested structure handling with proper scope and context
+- Complex redirection parsing (combined input/output redirections)
+- Command substitution integration
+- Variable assignment recognition
+- Bracket expression parsing for test conditions
+- Recursive descent with backtracking for ambiguous constructs
+
+### 5. Source Information System
+
+**SourceInfo Structure:**
+- Stores complete source text and position information
+- Enables round-trip conversion by preserving original formatting
+- Tracks line and column positions for debugging
+- Supports exact reproduction mode vs. synthesized output
 
 ## Parsing Approach
 
@@ -91,7 +121,8 @@ AST:
 %Command{
   name: "echo",
   args: ["hello"],
-  redirects: [%Redirect{type: :output, target: "output.txt"}]
+  redirects: [%Redirect{type: :output, target: "output.txt", source_info: %SourceInfo{}}],
+  source_info: %SourceInfo{}
 }
 ```
 
@@ -108,16 +139,17 @@ AST:
 ```elixir
 %Pipeline{
   commands: [
-    %Command{name: "ls", args: ["-la"], redirects: []},
-    %Command{name: "grep", args: [".ex"], redirects: []},
-    %Command{name: "wc", args: ["-l"], redirects: []}
-  ]
+    %Command{name: "ls", args: ["-la"], redirects: [], source_info: %SourceInfo{}},
+    %Command{name: "grep", args: [".ex"], redirects: [], source_info: %SourceInfo{}},
+    %Command{name: "wc", args: ["-l"], redirects: [], source_info: %SourceInfo{}}
+  ],
+  source_info: %SourceInfo{}
 }
 ```
 
 ### Conditional Parsing
 
-Conditionals use the `if`, `then`, `else`, `fi` keywords.
+Conditionals use the `if`, `then`, `else`, `fi` keywords with proper nesting.
 
 Example:
 ```bash
@@ -131,19 +163,22 @@ fi
 AST:
 ```elixir
 %Conditional{
-  condition: %Command{name: "test", args: ["-f", "file.txt"], redirects: []},
+  condition: %Command{name: "test", args: ["-f", "file.txt"], redirects: [], source_info: %SourceInfo{}},
   then_branch: %Script{
-    commands: [%Command{name: "echo", args: ["File exists"], redirects: []}]
+    commands: [%Command{name: "echo", args: ["File exists"], redirects: [], source_info: %SourceInfo{}}],
+    source_info: %SourceInfo{}
   },
   else_branch: %Script{
-    commands: [%Command{name: "echo", args: ["File does not exist"], redirects: []}]
-  }
+    commands: [%Command{name: "echo", args: ["File does not exist"], redirects: [], source_info: %SourceInfo{}}],
+    source_info: %SourceInfo{}
+  },
+  source_info: %SourceInfo{}
 }
 ```
 
 ### Loop Parsing
 
-Loops use the `for`/`while`, `do`, `done` keywords.
+Loops use the `for`/`while`, `do`, `done` keywords with proper nesting.
 
 Example:
 ```bash
@@ -158,89 +193,5 @@ AST:
   type: :for,
   condition: %{variable: "file", items: ["*.txt"]},
   body: %Script{
-    commands: [%Command{name: "echo", args: ["Processing $file"], redirects: []}]
-  }
-}
-```
-
-
-## Challenges and Considerations
-
-### 1. Nested Structures
-
-Handling nested structures requires careful tracking of context. For example:
-
-```bash
-if test -f file.txt; then
-  for line in $(cat file.txt); do
-    echo "Line: $line"
-  done
-else
-  echo "File not found"
-fi
-```
-
-The parser must correctly handle the nesting of the `for` loop inside the `if` statement.
-
-### 2. Quoted Strings
-
-Quoted strings require special handling in the lexer. Both single and double quotes should be supported, and quotes within quotes (escaped) should be handled correctly.
-
-### 3. Variable Expansion
-
-While the parser doesn't need to perform variable expansion, it should correctly identify variables in the input.
-
-### 4. Error Handling
-
-The parser should provide meaningful error messages for syntax errors. This includes:
-- Unclosed quotes
-- Missing keywords (e.g., `then` without a matching `fi`)
-- Invalid command syntax
-
-
-## Implementation Strategy
-
-1. Define the AST structures to represent bash commands
-2. Implement the Lexer to tokenize input
-3. Create the Parser to build AST from tokens
-4. Develop the Serializer to convert AST back to bash
-5. Add execution modes for different operations
-6. Create comprehensive tests for all components
-7. Update documentation to explain the functionality
-
-## Testing Strategy
-
-1. Unit tests for the lexer
-2. Unit tests for the parser
-3. Unit tests for the serializer
-4. Round-trip tests for basic functionality
-5. Tests for edge cases (nested structures, complex commands)
-
-## Execution Modes
-
-The interpreter now supports multiple execution modes:
-
-1. **Pretty Print Mode**: Visualizes the AST in a human-readable format
-2. **Serialization Mode**: Converts the AST back to bash syntax
-3. **Eager Mode** (not implemented yet): Will execute the commands
-
-## Round Trip Testing
-
-The interpreter includes round trip testing to verify that bash syntax can be parsed into an AST and then serialized back to equivalent bash syntax. The serialized output may have different formatting than the original input, but it should be functionally equivalent.
-
-## Future Extensions
-
-1. **Implement an executor to run the commands**:
-   - Support for executing commands in a controlled environment
-   - Variable expansion
-   - Exit code handling
-2. **Add support for more bash features**:
-   - Functions
-   - Subshells
-   - Command substitution
-   - Arithmetic expansion
-3. **Add support for bash builtins**:
-   - cd, echo, export, etc.
-4. **Enhance error reporting and recovery**:
-   - Better error messages
-   - Recovery from syntax errors
+    commands: [%Command{name: "echo", args: ["Processing $file"], redirects: [], source_info: %SourceInfo{}}],
+    source_info: %

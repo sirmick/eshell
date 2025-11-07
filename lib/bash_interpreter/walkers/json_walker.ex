@@ -160,9 +160,16 @@ defmodule BashInterpreter.Walkers.JSONWalker do
   """
   def to_json(ast_node, opts \\ []) do
     json_map = walk(ast_node, __MODULE__, opts)
-    case Jason.encode(json_map) do
-      {:ok, encoded} -> encoded
-      _ -> Jason.encode!(walk_default(ast_node, opts))
+
+    # Try to use Jason if available, otherwise use basic string conversion
+    if Code.ensure_loaded?(Jason) do
+      case Jason.encode(json_map) do
+        {:ok, encoded} -> encoded
+        _ -> Jason.encode!(walk_default(ast_node, opts))
+      end
+    else
+      # Fallback to basic string conversion for debugging
+      inspect(json_map)
     end
   end
 end

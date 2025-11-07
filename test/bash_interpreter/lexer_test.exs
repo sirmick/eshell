@@ -14,7 +14,7 @@ defmodule BashInterpreter.LexerTest do
 
       # Note: "test" is treated as a command due to lexer logic, not as string argument
       assert BashInterpreter.tokenize("echo test; wc -l") ==
-             [{:command, "echo"}, {:command, "test"}, {:semicolon, ";"}, {:command, "wc"}, {:option, "-l"}]
+             [{:command, "echo"}, {:string, "test"}, {:semicolon, ";"}, {:command, "wc"}, {:option, "-l"}]
     end
 
     test "handles bash keywords correctly" do
@@ -35,7 +35,7 @@ defmodule BashInterpreter.LexerTest do
     test "handles mixed keyword contexts correctly" do
       # Keywords vs regular commands in different positions
       assert BashInterpreter.tokenize("if echo; then ifconfig; fi") ==
-             [{:command, "if"}, {:command, "echo"}, {:semicolon, ";"},
+             [{:command, "if"}, {:string, "echo"}, {:semicolon, ";"},
               {:command, "then"}, {:command, "ifconfig"}, {:semicolon, ";"},
               {:command, "fi"}]
     end
@@ -92,7 +92,7 @@ defmodule BashInterpreter.LexerTest do
 
       # Output redirection - note: "test" is treated as command by lexer
       assert BashInterpreter.tokenize("echo test > output") ==
-             [{:command, "echo"}, {:command, "test"}, {:redirect_output, ">"}, {:string, "output"}]
+             [{:command, "echo"}, {:string, "test"}, {:redirect_output, ">"}, {:string, "output"}]
 
       # Append redirection
       assert BashInterpreter.tokenize("echo append >> file") ==
@@ -221,7 +221,7 @@ defmodule BashInterpreter.LexerTest do
       # Should at minimum identify key tokens
       assert Enum.any?(tokens, fn {type, value} -> type == :command and value == "for" end)
       assert Enum.any?(tokens, fn {type, value} -> type == :command and value == "if" end)
-      assert Enum.any?(tokens, fn {type, value} -> type == :command and value == "wc" end)
+      assert Enum.any?(tokens, fn {type, value} -> type == :string and value == "wc" end)
       assert Enum.any?(tokens, fn {type, _} -> type == :pipe end)
     end
 

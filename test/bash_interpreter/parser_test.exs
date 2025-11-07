@@ -246,6 +246,11 @@ defmodule BashInterpreter.ParserTestClean do
       conditional = hd(ast.commands)
       assert %AST.Conditional{} = conditional
       assert conditional.condition.name == "test"
+      assert %BashInterpreter.AST.Conditional{then_branch: %BashInterpreter.AST.Script{commands: [%BashInterpreter.AST.Command{name: "echo", args: ["File exists"]}]}} = conditional
+      assert conditional.else_branch == nil
+      assert conditional.condition.name == "test"
+      assert conditional.then_branch.commands == [%BashInterpreter.AST.Command{name: "echo", args: ["File exists"], redirects: [], source_info: %BashInterpreter.AST.SourceInfo{column: 1, end_column: 1, end_line: 1, line: 1, text: ""}}]
+      assert conditional.else_branch == nil
     end
 
     test("if with else") do
@@ -266,6 +271,8 @@ defmodule BashInterpreter.ParserTestClean do
       assert %AST.Loop{} = loop
       assert loop.type == :for
       assert loop.condition.variable == "file"
+      assert loop.condition.items == ["*.txt"]
+      assert %BashInterpreter.AST.Loop{body: %BashInterpreter.AST.Script{commands: [%BashInterpreter.AST.Command{name: "echo", args: ["test"]}]}} = loop
     end
 
     test("while loop") do
@@ -274,6 +281,9 @@ defmodule BashInterpreter.ParserTestClean do
       loop = hd(ast.commands)
       assert %AST.Loop{} = loop
       assert loop.type == :while
+      assert loop.condition.args == ["test", "$count", "-lt", "10"]
+      assert loop.condition.args == ["test", "$count", "-lt", "10"]
+      assert %BashInterpreter.AST.Loop{body: %BashInterpreter.AST.Script{commands: [%BashInterpreter.AST.Command{name: "echo", args: ["$count"]}]}} = loop
     end
   end
 
@@ -367,6 +377,178 @@ defmodule BashInterpreter.ParserTestClean do
       ast = assert_parsing_correctness(input, "handles empty loop body")
       loop = hd(ast.commands)
       assert loop.body.commands != []
+    end
+  end
+
+  describe "basic functionality coverage" do
+    test("tokenizes a simple command") do
+      input = "echo hello"
+      expected = [{:command, "echo"}, {:string, "hello"}]
+      assert BashInterpreter.tokenize(input) == expected
+    end
+
+    test("parses a simple command") do
+      input = "echo hello"
+      result = BashInterpreter.parse(input)
+      assert %BashInterpreter.AST.Script{} = result
+      assert length(result.commands) == 1
+      assert %BashInterpreter.AST.Command{} = hd(result.commands)
+      assert hd(result.commands).name == "echo"
+      assert hd(result.commands).args == ["hello"]
+    end
+
+    test("parses a pipeline") do
+      input = "ls -la | grep .ex"
+      result = BashInterpreter.parse(input)
+      assert %BashInterpreter.AST.Script{} = result
+      assert length(result.commands) == 1
+      assert %BashInterpreter.AST.Pipeline{} = hd(result.commands)
+      assert length(hd(result.commands).commands) == 2
+    end
+
+    test("pretty prints a simple command") do
+      input = "echo hello"
+      ast = BashInterpreter.parse(input)
+      result = BashInterpreter.pretty_print(ast)
+      assert is_binary(result)
+      assert String.contains?(result, "echo hello")
+    end
+
+    test("pretty prints a pipeline") do
+      input = "ls -la | grep .ex"
+      ast = BashInterpreter.parse(input)
+      result = BashInterpreter.pretty_print(ast)
+      assert is_binary(result)
+      assert String.contains?(result, "Pipeline")
+      assert String.contains?(result, "ls -la")
+      assert String.contains?(result, "grep .ex")
+    end
+
+    test("handles complex nested structures") do
+      input = "echo complex"
+      result = BashInterpreter.parse(input)
+      assert %BashInterpreter.AST.Script{} = result
+
+      json = BashInterpreter.to_json(result)
+      assert is_binary(json)
+      assert String.contains?(json, "script")
+      assert String.contains?(json, "command")
+    end
+  end
+
+  describe "error handling" do
+    test("unclosed quotes") do
+      input = "echo \"unclosed"
+      ast = assert_parsing_correctness(input, "handles unclosed quotes gracefully")
+      assert %AST.Script{commands: [%AST.Command{name: "echo", args: []}]} = ast
+    end
+
+    test("missing then keyword") do
+      input = "if test -f file.txt; echo \"found\"; fi"
+      ast = assert_parsing_correctness(input, "handles missing then keyword")
+      assert %AST.Script{commands: [%AST.Conditional{}]} = ast
+    end
+
+    test("missing fi keyword") do
+      input = "if test -f file.txt; then echo \"found\""
+      ast = assert_parsing_correctness(input, "handles missing fi keyword")
+      assert %AST.Script{commands: [%AST.Conditional{}]} = ast
+    end
+
+    test("invalid command syntax") do
+      input = "echo > output.txt hello"
+      ast = assert_parsing_correctness(input, "handles invalid command syntax")
+      assert %AST.Script{commands: [%AST.Command{name: "echo", args: ["hello"]}]} = ast
+    end
+
+    test("nested error recovery") do
+      input = """
+      if test -f file.txt; then
+        for item in *; do
+          echo $item
+        done
+      fi
+      """
+      ast = assert_parsing_correctness(input, "handles nested structures with errors")
+      assert %AST.Script{commands: [%AST.Conditional{}]} = ast
+    end
+  end
+
+  describe "newline-separated commands" do
+    test "parses newline-separated commands individually" do
+      input = """
+      echo hello
+      ls -la
+      pwd
+      """
+
+      ast = BashInterpreter.parse(input)
+      assert length(ast.commands) == 3
+
+      commands = ast.commands
+      assert hd(commands).name == "echo"
+      assert hd(commands).args == ["hello"]
+      assert Enum.at(commands, 1).name == "ls"
+      assert Enum.at(commands, 1).args == ["-la"]
+      assert Enum.at(commands, 2).name == "pwd"
+      assert Enum.at(commands, 2).args == []
+    end
+
+    test "handles mixed newlines and semicolons" do
+      input = """
+      echo hello
+      ls -la;
+      pwd
+      """
+
+      ast = BashInterpreter.parse(input)
+      assert length(ast.commands) == 3
+
+      [cmd1, cmd2, cmd3] = ast.commands
+      assert cmd1.name == "echo"
+      assert cmd1.args == ["hello"]
+      assert cmd2.name == "ls"
+      assert cmd2.args == ["-la"]
+      assert cmd3.name == "pwd"
+      assert cmd3.args == []
+    end
+
+    test "shebang does not consume the whole script with newlines" do
+      input = """
+      #!/bin/bash
+      echo hello
+      ls -la
+      """
+
+      ast = BashInterpreter.parse(input)
+      assert length(ast.commands) >= 3
+
+      # First command should be #!/bin/bash
+      assert hd(ast.commands).name == "#!/bin/bash"
+
+      # Should have separate echo and ls commands
+      echo_cmd = Enum.find(ast.commands, fn cmd -> cmd.name == "echo" end)
+      assert echo_cmd != nil
+      assert echo_cmd.args == ["hello"]
+
+      ls_cmd = Enum.find(ast.commands, fn cmd -> cmd.name == "ls" end)
+      assert ls_cmd != nil
+      assert ls_cmd.args == ["-la"]
+    end
+
+    test "newline separation works with pipelines" do
+      input = """
+      ls -la | grep txt
+      pwd
+      echo hello
+      """
+
+      ast = BashInterpreter.parse(input)
+      assert length(ast.commands) == 3
+
+      assert %AST.Pipeline{} = Enum.at(ast.commands, 0)
+      assert Enum.at(ast.commands, 1).name == "pwd"
+      assert Enum.at(ast.commands, 2).name == "echo"
     end
   end
 end

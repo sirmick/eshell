@@ -52,8 +52,12 @@ defmodule BashInterpreter.Parser do
   # Base case: no more tokens
   defp parse_commands([], commands, _original_input), do: {Enum.reverse(commands), []}
 
-  # Skip empty semicolons and control structure keywords
+  # Skip empty semicolons, newlines, and control structure keywords
   defp parse_commands([{:semicolon, _} | rest], commands, original_input) do
+    parse_commands(rest, commands, original_input)
+  end
+
+  defp parse_commands([{:newline, _} | rest], commands, original_input) do
     parse_commands(rest, commands, original_input)
   end
 
@@ -147,8 +151,9 @@ defmodule BashInterpreter.Parser do
   # Base case: no more tokens
   defp parse_args_and_redirects([], args, redirects, _original_input), do: {Enum.reverse(args), Enum.reverse(redirects), []}
 
-  # Stop at semicolon, pipe, or control structure keywords
+  # Stop at semicolon, newline, pipe, or control structure keywords
   defp parse_args_and_redirects([{:semicolon, _} | _] = tokens, args, redirects, _original_input), do: {Enum.reverse(args), Enum.reverse(redirects), tokens}
+  defp parse_args_and_redirects([{:newline, _} | _] = tokens, args, redirects, _original_input), do: {Enum.reverse(args), Enum.reverse(redirects), tokens}
   defp parse_args_and_redirects([{:pipe, _} | _] = tokens, args, redirects, _original_input), do: {Enum.reverse(args), Enum.reverse(redirects), tokens}
   defp parse_args_and_redirects([{:command, word} | _] = tokens, args, redirects, _original_input) when word in ["then", "else", "fi", "do", "done", "in"], do: {Enum.reverse(args), Enum.reverse(redirects), tokens}
 

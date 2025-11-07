@@ -4,7 +4,6 @@ defmodule BashInterpreter.Walkers.JSONWalker do
   """
 
   alias BashInterpreter.AST
-  alias BashInterpreter.ASTWalker
 
   @doc """
   Walks a Script node and returns JSON representation.
@@ -58,7 +57,7 @@ defmodule BashInterpreter.Walkers.JSONWalker do
   @doc """
   Walks a Conditional node and returns JSON representation.
   """
-  def walk_conditional(%AST.Conditional{condition: condition, then_branch: then_branch, else_branch: else_branch}, opts) do
+  def walk_conditional(%AST.Conditional{condition: condition, then_branch: then_branch, else_branch: else_branch}, _opts) do
     base = %{
       type: "conditional",
       condition: walk(condition, __MODULE__, []),
@@ -75,7 +74,7 @@ defmodule BashInterpreter.Walkers.JSONWalker do
   @doc """
   Walks a Loop node and returns JSON representation.
   """
-  def walk_loop(%AST.Loop{type: type, condition: condition, body: body}, opts) do
+  def walk_loop(%AST.Loop{type: type, condition: condition, body: body}, _opts) do
     condition_json = case type do
       :for ->
         %{type: "for_loop", variable: condition.variable, items: condition.items}
@@ -104,7 +103,7 @@ defmodule BashInterpreter.Walkers.JSONWalker do
   @doc """
   Walks a Subshell node and returns JSON representation.
   """
-  def walk_subshell(%AST.Subshell{script: script}, opts) do
+  def walk_subshell(%AST.Subshell{script: script}, _opts) do
     %{
       type: "subshell",
       script: walk(script, __MODULE__, [])
@@ -161,8 +160,9 @@ defmodule BashInterpreter.Walkers.JSONWalker do
   """
   def to_json(ast_node, opts \\ []) do
     json_map = walk(ast_node, __MODULE__, opts)
-    Jason.Formatter.pretty_print(Jason.encode!(json_map))
-  rescue
-    _ -> Jason.Formatter.pretty_print(Jason.encode!(walk_default(ast_node, opts)))
+    case Jason.encode(json_map) do
+      {:ok, encoded} -> encoded
+      _ -> Jason.encode!(walk_default(ast_node, opts))
+    end
   end
 end

@@ -14,7 +14,6 @@ This project is a **proof of concept** that demonstrates the basic structure of 
 - ✅ Supports serialization of AST back to bash syntax
 - ✅ Includes round trip testing (bash -> AST -> bash)
 - ❌ Does not execute the commands
-- ❌ Does not execute the commands
 
 See [DESIGN.md](DESIGN.md) for a detailed specification of the intended functionality.
 

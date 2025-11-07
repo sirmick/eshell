@@ -8,7 +8,6 @@ defmodule BashInterpreter.ParserTestClean do
   doctest BashInterpreter.Parser
 
   # Comprehensive test suite focusing on structural validation
-  alias BashInterpreter.Parser
   alias BashInterpreter.AST
 
   setup do

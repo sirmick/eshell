@@ -8,7 +8,6 @@ defmodule BashInterpreter.RoundTripTest do
   """
 
   @max_memory_mb 200
-  @timeout_ms 3000
 
   setup do
     memory_before = :erlang.memory()
